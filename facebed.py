@@ -25,7 +25,7 @@ from discord_webhook import DiscordWebhook
 from yattag import indent
 
 CONFIG_STR = '''
-host: 0.0.0.0
+host: "::"
 port: 9812
 timezone: 7
 banned_users: []
