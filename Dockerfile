@@ -10,4 +10,5 @@ RUN /bin/sh -c "echo '{}' > ./config.yaml"
 COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 RUN adduser -D facebed
 USER facebed
+EXPOSE 9812
 CMD ["python3.14", "./facebed.py", "-c", "./config.yaml"]
