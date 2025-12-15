@@ -207,6 +207,7 @@ class Story:
     url: str
 
     author_id: int
+    author_picture: str
     attached_story: Self
 
     def __init__(self, story_json: dict):
@@ -216,6 +217,7 @@ class Story:
         self.video_links = self.get_video_links(story_json)
         self.url = story_json['wwwURL']
         self.author_id = story_json['actors'][0]['id']
+        self.author_picture = self.get_profile_picture(story_json['actors'][0])
 
         if 'attached_story' in story_json and story_json['attached_story'] and 'actors' in story_json['attached_story']:
             self.attached_story = Story(story_json['attached_story'])
@@ -244,6 +246,38 @@ class Story:
 
         return video_links
 
+    @staticmethod
+    def get_profile_picture(actor_json: dict) -> str:
+        # Try common profile picture field names (including Facebook's displayPicture)
+        for field in ['displayPicture', 'profile_picture_uri', 'profile_picture', 'picture', 'profilePicture', 'profile_pic_uri', 'profile_pic']:
+            if field in actor_json and actor_json[field]:
+                if isinstance(actor_json[field], dict):
+                    # Handle nested structure like {'uri': 'url'}
+                    if 'uri' in actor_json[field]:
+                        return actor_json[field]['uri']
+                    elif 'url' in actor_json[field]:
+                        return actor_json[field]['url']
+                elif isinstance(actor_json[field], str):
+                    return actor_json[field]
+        
+        # Try nested structures
+        for nested_field in ['displayPicture', 'profilePicture', 'profile_picture', 'picture', 'profile_pic']:
+            if nested_field in actor_json and isinstance(actor_json[nested_field], dict):
+                for uri_field in ['uri', 'url', 'src']:
+                    if uri_field in actor_json[nested_field]:
+                        return actor_json[nested_field][uri_field]
+        
+        # Try to find any field containing 'picture' or 'photo'
+        for key, value in actor_json.items():
+            if 'picture' in key.lower() or 'photo' in key.lower():
+                if isinstance(value, str) and value.startswith('http'):
+                    return value
+                elif isinstance(value, dict):
+                    for uri_field in ['uri', 'url', 'src']:
+                        if uri_field in value and isinstance(value[uri_field], str):
+                            return value[uri_field]
+        
+        return ''
 
     @staticmethod
     def get_image_links_post_json(post_json: dict) -> list[str]:
@@ -285,13 +319,14 @@ class ParsedPost:
     comments: str
     shares: str
     video_links: list[str]
+    author_picture: str
 
 
 def banned(url: str) -> ParsedPost:
     Utils.warn(f'banned embed attempted "{url}"')
     return ParsedPost('Banned', 'This user is banned by the operators of this embed server',
                       [], 'https://banned.facebook.com', -1,
-                      'null', 'null', 'null', [])
+                      'null', 'null', 'null', [], '')
 
 
 class FacebedException(Exception):
@@ -410,7 +445,7 @@ class JsonParser:
 
         # TODO: support normal /watch here
         return ParsedPost(link_header, post_content.strip(), story.image_links, post_url, post_date,
-                          likes, cmts, shares, story.video_links)
+                          likes, cmts, shares, story.video_links, story.author_picture)
 
 
 
@@ -447,11 +482,12 @@ class SinglePhotoParser:
         post_text = content_node['message']['text'] if content_node['message'] and 'text' in content_node['message'] else ''
         post_author = content_node['owner']['name']
         post_date = content_node['created_time']
+        author_picture = Story.get_profile_picture(content_node['owner'])
         likes, cmts, shares = JsonParser.get_interaction_counts(interaction_node)
         image_url = SinglePhotoParser.get_single_image(html_parser)
 
         return ParsedPost(post_author, post_text.strip(), [image_url], JsonParser.ensure_full_url(post_path),
-                          post_date, likes, cmts, shares, [])
+                          post_date, likes, cmts, shares, [], author_picture)
 
 
 class ReelsParser:
@@ -530,24 +566,29 @@ class ReelsParser:
         post_url = content_node['short_form_video_context']['shareable_url']
         post_date = content_node['creation_time']
         post_text = content_node['message']['text']
+        author_picture = Story.get_profile_picture(owner_info)
 
         likes, cmts, shares = ReelsParser.get_reaction_counts(html_parser, is_ig, video_id)
 
         if owner_info['id'] in config['banned_users']:
             return banned(post_url)
 
-        return ParsedPost(op_name, post_text, [], post_url, post_date, likes, cmts, shares, [video_link])
+        return ParsedPost(op_name, post_text, [], post_url, post_date, likes, cmts, shares, [video_link], author_picture)
 
 
 class VideoWatchParser:
     # excluding group post video since they are handled by jsonparser
     @staticmethod
-    def get_op_name(html_parser: BeautifulSoup) -> str:
+    def get_owner_info(html_parser: BeautifulSoup) -> dict:
         for json_block in JsonParser.get_json_blocks(html_parser, sort=False):
             if 'is_additional_profile_plus' in json_block:
                 bloc = json.loads(json_block)
-                return Jq.first(bloc, 'owner')['name']
+                return Jq.first(bloc, 'owner')
         raise FacebedException('Invalid watch link (opn)')
+
+    @staticmethod
+    def get_op_name(html_parser: BeautifulSoup) -> str:
+        return VideoWatchParser.get_owner_info(html_parser)['name']
 
 
     @staticmethod
@@ -575,14 +616,44 @@ class VideoWatchParser:
         video_link = ReelsParser.get_video_link(html_parser)
 
         post_url = JsonParser.ensure_full_url(post_path)
-        op_name = VideoWatchParser.get_op_name(html_parser)
+        owner_info = VideoWatchParser.get_owner_info(html_parser)
+        op_name = owner_info['name']
+        author_picture = Story.get_profile_picture(owner_info)
         post_text = content_node['title']['text'] if content_node['title'] else ''
         likes = Utils.human_format(content_node['feedback']['reaction_count']['count'])
         shares = 'null'
         cmts = Utils.human_format(content_node['feedback']['total_comment_count'])
         post_date = VideoWatchParser.get_date(html_parser)
 
-        return ParsedPost(op_name, post_text, [], post_url, post_date, likes, cmts, shares, [video_link])
+        return ParsedPost(op_name, post_text, [], post_url, post_date, likes, cmts, shares, [video_link], author_picture)
+
+
+def format_parsed_post_json(post: ParsedPost) -> dict:
+    return {
+        "success": True,
+        "data": {
+            "author_name": post.author_name,
+            "author_picture": post.author_picture,
+            "text": post.text,
+            "url": post.url,
+            "date": post.date,
+            "date_formatted": Utils.timestamp_to_str(post.date),
+            "likes": post.likes,
+            "comments": post.comments,
+            "shares": post.shares,
+            "image_links": post.image_links,
+            "video_links": post.video_links,
+            "reactions_formatted": Utils.format_reactions_str(post.likes, post.comments, post.shares)
+        }
+    }
+
+
+def format_error_json(original_url: str, error_msg: str = None) -> dict:
+    return {
+        "success": False,
+        "error": error_msg or "Unable to process this Facebook URL. It may be private, deleted, or require authentication.",
+        "original_url": original_url
+    }
 
 
 def format_error_message_embed(original_url: str) -> str:
@@ -690,6 +761,59 @@ def process_single_photo(post_path: str) -> str:
     if type(parsed_post) == ParsedPost:
         return format_full_post_embed(parsed_post)
     return format_error_message_embed(f'{WWWFB}/{post_path}')
+
+
+@app.route('/api/<path:path>')
+def api_index(path: str):
+    response.content_type = 'application/json'
+    
+    if request.query_string:
+        path += f'?{request.query_string}'
+
+    if 'type' in request.query.dict and '3' in request.query.dict['type']:
+        return json.dumps(format_error_json(f'{WWWFB}/{path}'))
+
+    try:
+        if re.match('^(/)?share/v/.*', path):
+            path = Utils.resolve_share_link(path)
+            if not path:
+                return json.dumps(format_error_json(f'{WWWFB}/{path}'))
+
+        if re.match('^(/)?share/([pr]/)?[a-zA-Z0-9-._]*(/)?', path):
+            path = Utils.resolve_share_link(path)
+            if not path:
+                return json.dumps(format_error_json(f'{WWWFB}/{path}'))
+
+        search = re.search(r'/videos/(\d+).*', path)
+        if search:
+            video_id = search.group(1)
+            path = f'reel/{video_id}'
+
+        if re.match(f'^/?reel/[0-9]+', path):
+            parsed_post = ReelsParser.process_post(path)
+            return json.dumps(format_parsed_post_json(parsed_post), ensure_ascii=False, indent=2)
+
+        if re.match('^/*photo/*$', urlparse(path).path):
+            parsed_post = SinglePhotoParser.process_post(path)
+            return json.dumps(format_parsed_post_json(parsed_post), ensure_ascii=False, indent=2)
+
+        if re.match('^/*watch', urlparse(path).path):
+            parsed_post = VideoWatchParser.process_post(path)
+            return json.dumps(format_parsed_post_json(parsed_post), ensure_ascii=False, indent=2)
+
+        if is_facebook_url(path):
+            path_clean = path.removeprefix(WWWFB).removeprefix('/')
+            parsed_post = JsonParser.process_post(path_clean)
+            return json.dumps(format_parsed_post_json(parsed_post), ensure_ascii=False, indent=2)
+        else:
+            return json.dumps(format_error_json('https://git.facebed.com', 'Invalid Facebook URL format'))
+
+    except FacebedException as e:
+        print(traceback.format_exc())
+        return json.dumps(format_error_json(f'{WWWFB}/{path}', str(e)))
+    except Exception as e:
+        print(traceback.format_exc())
+        return json.dumps(format_error_json(f'{WWWFB}/{path}', f'Unexpected error: {str(e)}'))
 
 
 @app.route('/<path:path>')
