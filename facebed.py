@@ -110,9 +110,9 @@ class Utils:
 
     @staticmethod
     def format_reactions_str(likes: str, cmts: str, shares: str) -> str:
-        likes_str = f'❤️ {likes}' if likes != 'null' else ''
-        cmts_str = f'💬 {cmts}' if cmts != 'null' else ''
-        shares_str = f'🔁 {shares}' if shares != 'null' else ''
+        likes_str = f'❤️ {likes}' if likes and likes != 'null' else ''
+        cmts_str = f'💬 {cmts}' if cmts and cmts != 'null' else ''
+        shares_str = f'🔁 {shares}' if shares and shares != 'null' else ''
         fmt = ' • '.join([x for x in [likes_str, cmts_str, shares_str] if x]).replace(',', '.')
         return fmt
 
@@ -326,7 +326,7 @@ def banned(url: str) -> ParsedPost:
     Utils.warn(f'banned embed attempted "{url}"')
     return ParsedPost('Banned', 'This user is banned by the operators of this embed server',
                       [], 'https://banned.facebook.com', -1,
-                      'null', 'null', 'null', [], '')
+                      None, None, None, [], '')
 
 
 class FacebedException(Exception):
@@ -621,7 +621,7 @@ class VideoWatchParser:
         author_picture = Story.get_profile_picture(owner_info)
         post_text = content_node['title']['text'] if content_node['title'] else ''
         likes = Utils.human_format(content_node['feedback']['reaction_count']['count'])
-        shares = 'null'
+        shares = None
         cmts = Utils.human_format(content_node['feedback']['total_comment_count'])
         post_date = VideoWatchParser.get_date(html_parser)
 
