@@ -399,7 +399,13 @@ class JsonParser:
             comet_section = Jq.first(hoisted_feed, 'comet_sections')
             return comet_section
 
-        methods: list[Callable[[], dict]] = [work_normal_post, work_group_post]
+        def work_group_post_v2() -> dict:
+            data_blob = Jq.first(post_json, 'data')
+            if 'node_v2' in data_blob and 'comet_sections' in data_blob['node_v2']:
+                return data_blob['node_v2']['comet_sections']
+            return None
+
+        methods: list[Callable[[], dict]] = [work_normal_post, work_group_post, work_group_post_v2]
 
         for method in methods:
             try:
