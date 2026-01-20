@@ -64,6 +64,7 @@ class Utils:
         return path
 
 
+
     @staticmethod
     def prettify(txt: str) -> str:
         return indent(txt, indentation ='    ', newline = '\n', indent_text = True)
@@ -800,7 +801,8 @@ def api_index(path: str):
             if not path:
                 return json.dumps(format_error_json(f'{WWWFB}/{path}'))
 
-        search = re.search(r'/videos/(\d+).*', path)
+        # Handle /videos/ URLs with ID at the end (e.g., /videos/some-title/123456/)
+        search = re.search(r'/videos/(?:.*?/)?(\d+)/?', path)
         if search:
             video_id = search.group(1)
             path = f'reel/{video_id}'
@@ -851,7 +853,8 @@ def index(path: str):
             if not path:
                 return format_error_message_embed(f'{WWWFB}/{path}')
 
-        search = re.search(r'/videos/(\d+).*', path)
+        # Handle /videos/ URLs with ID at the end (e.g., /videos/some-title/123456/)
+        search = re.search(r'/videos/(?:.*?/)?(\d+)/?', path)
         if search:
             video_id = search.group(1)
             path = f'reel/{video_id}'
