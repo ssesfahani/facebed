@@ -808,7 +808,11 @@ def api_index(path: str):
             path = f'reel/{video_id}'
 
         if re.match(f'^/?reel/[0-9]+', path):
-            parsed_post = ReelsParser.process_post(path)
+            video_id = re.match(f'^/?reel/([0-9]+)', path).group(1)
+            try:
+                parsed_post = ReelsParser.process_post(path)
+            except Exception:
+                parsed_post = VideoWatchParser.process_post(f'watch?v={video_id}')
             return json.dumps(format_parsed_post_json(parsed_post), ensure_ascii=False, indent=2)
 
         if re.match('^/*photo/*$', urlparse(path).path):
@@ -860,7 +864,12 @@ def index(path: str):
             path = f'reel/{video_id}'
 
         if re.match(f'^/?reel/[0-9]+', path):
-            return format_reel_post_embed(ReelsParser.process_post(path))
+            video_id = re.match(f'^/?reel/([0-9]+)', path).group(1)
+            try:
+                parsed_post = ReelsParser.process_post(path)
+            except Exception:
+                parsed_post = VideoWatchParser.process_post(f'watch?v={video_id}')
+            return format_reel_post_embed(parsed_post)
 
         if re.match('^/*photo/*$', urlparse(path).path):
             return process_single_photo(path)
