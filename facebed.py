@@ -815,7 +815,7 @@ def api_index(path: str):
                 parsed_post = VideoWatchParser.process_post(f'watch?v={video_id}')
             return json.dumps(format_parsed_post_json(parsed_post), ensure_ascii=False, indent=2)
 
-        if re.match('^/*photo/*$', urlparse(path).path):
+        if re.match(r'^/?(?:.*/)?photos?', path):
             parsed_post = SinglePhotoParser.process_post(path)
             return json.dumps(format_parsed_post_json(parsed_post), ensure_ascii=False, indent=2)
 
@@ -871,7 +871,7 @@ def index(path: str):
                 parsed_post = VideoWatchParser.process_post(f'watch?v={video_id}')
             return format_reel_post_embed(parsed_post)
 
-        if re.match('^/*photo/*$', urlparse(path).path):
+        if re.match(r'^/?(?:.*/)?photos?', path):
             return process_single_photo(path)
 
         if re.match('^/*watch', urlparse(path).path):
