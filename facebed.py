@@ -309,6 +309,15 @@ class Story:
         return ''
 
 @dataclass
+class CommunityNote:
+    heading: str
+    body_text: str
+    source_url: str
+    source_title: str
+    note_id: str
+    is_ai_generated: bool
+
+@dataclass
 class ParsedPost:
     author_name: str
     text: str
@@ -321,6 +330,7 @@ class ParsedPost:
     shares: str
     video_links: list[str]
     author_picture: str
+    community_note: CommunityNote | None = None
 
 
 def banned(url: str) -> ParsedPost:
@@ -432,6 +442,30 @@ class JsonParser:
         raise FacebedException('Cannot process post')
 
     @staticmethod
+    def get_community_note(post_json: dict) -> CommunityNote | None:
+        """Extract community note from the post JSON if present."""
+        try:
+            itvm = (post_json.get('footer', {})
+                    .get('story', {})
+                    .get('comet_sections', {})
+                    .get('action_link', {})
+                    .get('inform_treatment_view_model'))
+            if not itvm or not itvm.get('body_text'):
+                return None
+
+            learn_more = itvm.get('learn_more', {}) or {}
+            return CommunityNote(
+                heading=itvm.get('heading', ''),
+                body_text=itvm.get('body_text', ''),
+                source_url=learn_more.get('community_note_uri', ''),
+                source_title=learn_more.get('community_note_uri_title', ''),
+                note_id=str(learn_more.get('community_note_id', '')),
+                is_ai_generated=bool(learn_more.get('community_note_is_ai_generated', False)),
+            )
+        except (AttributeError, TypeError, KeyError):
+            return None
+
+    @staticmethod
     def ensure_full_url(u: str) -> str:
         if u.startswith(WWWFB):
             return u
@@ -448,6 +482,7 @@ class JsonParser:
         likes, cmts, shares = JsonParser.get_interaction_counts(post_json)
         # noinspection PyTypeChecker
         post_date = int(Jq.first(post_json['context_layout']['story']['comet_sections']['metadata'], 'creation_time'))
+        community_note = JsonParser.get_community_note(post_json)
         post_json = post_json['content']['story']
 
         story = Story(post_json)
@@ -462,7 +497,7 @@ class JsonParser:
 
         # TODO: support normal /watch here
         return ParsedPost(link_header, post_content.strip(), story.image_links, post_url, post_date,
-                          likes, cmts, shares, story.video_links, story.author_picture)
+                          likes, cmts, shares, story.video_links, story.author_picture, community_note)
 
 
 
@@ -646,23 +681,33 @@ class VideoWatchParser:
 
 
 def format_parsed_post_json(post: ParsedPost) -> dict:
-    return {
-        "success": True,
-        "data": {
-            "author_name": post.author_name,
-            "author_picture": post.author_picture,
-            "text": post.text,
-            "url": post.url,
-            "date": post.date,
-            "date_formatted": Utils.timestamp_to_str(post.date),
-            "likes": post.likes,
-            "comments": post.comments,
-            "shares": post.shares,
-            "image_links": post.image_links,
-            "video_links": post.video_links,
-            "reactions_formatted": Utils.format_reactions_str(post.likes, post.comments, post.shares)
-        }
+    data = {
+        "author_name": post.author_name,
+        "author_picture": post.author_picture,
+        "text": post.text,
+        "url": post.url,
+        "date": post.date,
+        "date_formatted": Utils.timestamp_to_str(post.date),
+        "likes": post.likes,
+        "comments": post.comments,
+        "shares": post.shares,
+        "image_links": post.image_links,
+        "video_links": post.video_links,
+        "reactions_formatted": Utils.format_reactions_str(post.likes, post.comments, post.shares),
+        "community_note": None
     }
+
+    if post.community_note:
+        data["community_note"] = {
+            "heading": post.community_note.heading,
+            "body_text": post.community_note.body_text,
+            "source_url": post.community_note.source_url,
+            "source_title": post.community_note.source_title,
+            "note_id": post.community_note.note_id,
+            "is_ai_generated": post.community_note.is_ai_generated,
+        }
+
+    return {"success": True, "data": data}
 
 
 def format_error_json(original_url: str, error_msg: str = None) -> dict:
@@ -713,6 +758,10 @@ def format_reel_post_embed(post: ParsedPost) -> str:
     reaction_str = Utils.format_reactions_str(post.likes, post.comments, post.shares)
     post_date = Utils.timestamp_to_str(post.date)
     color = '#0866ff'
+    description = escape(post.text[:1024])
+    if post.community_note:
+        color = '#f0ad4e'
+        description += f'\n\n📋 {escape(post.community_note.heading)}\n{escape(post.community_note.body_text)}'
 
     return Utils.prettify(f'''<!DOCTYPE html>
         <html lang="">
@@ -720,7 +769,7 @@ def format_reel_post_embed(post: ParsedPost) -> str:
             <title>{get_credit()}</title>
             <meta charset="UTF-8"/>
             <meta property="og:title" content="{escape(post.author_name)}"/>
-            <meta property="og:description" content="{escape(post.text[:1024])}"/>
+            <meta property="og:description" content="{description}"/>
             <meta property="og:site_name" content="{get_credit()}\n{post_date}\n{reaction_str}"/>
             <meta property="og:url" content="{quote(post.url)}"/>
             <meta property="og:video:type" content="video/mp4"/>
@@ -745,6 +794,11 @@ def format_full_post_embed(post: ParsedPost) -> str:
     image_meta_tags = '\n'.join([f'<meta property="og:image" content="{iu}"/>' for iu in image_links])
     post_date = Utils.timestamp_to_str(post.date)
     reaction_str = Utils.format_reactions_str(post.likes, post.comments, post.shares)
+    color = '#0866ff'
+    description = escape(post.text[:1024])
+    if post.community_note:
+        color = '#f0ad4e'
+        description += f'\n\n📋 {escape(post.community_note.heading)}\n{escape(post.community_note.body_text)}'
 
     # TODO: organize and duplicate the neccessary tags
     return Utils.prettify(f'''<!DOCTYPE html>
@@ -753,14 +807,14 @@ def format_full_post_embed(post: ParsedPost) -> str:
             <title>{get_credit()}</title>
             <meta charset="UTF-8"/>
             <meta property="og:title" content="{escape(post.author_name)}"/>
-            <meta property="og:description" content="{escape(post.text[:1024])}"/>
+            <meta property="og:description" content="{description}"/>
             <meta property="og:site_name" content="{get_credit()}\n{post_date}\n{reaction_str}{image_counter}"/>
             <meta property="og:url" content="{quote(post.url)}"/>
             {image_meta_tags}
             <link rel="canonical" href="{quote(post.url)}"/>
             <meta http-equiv="refresh" content="0;url={quote(post.url)}"/>
             <meta name="twitter:card" content="summary_large_image"/>
-            <meta name="theme-color" content="#0866ff"/>
+            <meta name="theme-color" content="{color}"/>
         </head>
         </html>''')
 
