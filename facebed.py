@@ -57,11 +57,19 @@ class Utils:
     def resolve_share_link(path: str) -> str:
         # cookies not needed to resolve share links
         head_request = rq.head(f'{WWWFB}/{path}', headers=JsonParser.get_headers())
-        if head_request.next is None or head_request.next.url.startswith('https://www.facebook.com/share'):
-            return ''
-        path = head_request.next.url.removeprefix(f'{WWWFB}/')
-        # print(path)
-        return path
+        target = head_request.next.url if head_request.next else ''
+        if not target or target.startswith(f'{WWWFB}/share') or '/login' in target:
+            # Facebook sometimes answers 200 instead of redirecting; the target is then in og:url
+            # plain requests can't decode zstd, which get_headers() advertises
+            headers = {**JsonParser.get_headers(), 'accept-encoding': 'gzip, deflate'}
+            page = rq.get(f'{WWWFB}/{path}', headers=headers)
+            target = page.url
+            if target.startswith(f'{WWWFB}/share') or '/login' in target:
+                og_url = BeautifulSoup(page.text, 'html.parser').find('meta', property='og:url')
+                target = og_url.get('content', '') if og_url else ''
+            if not target.startswith(WWWFB) or target.startswith(f'{WWWFB}/share'):
+                return ''
+        return target.removeprefix(f'{WWWFB}/')
 
 
 
