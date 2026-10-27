@@ -1,4 +1,5 @@
 import argparse
+import base64
 import io
 import json
 import logging
@@ -14,7 +15,7 @@ from functools import wraps
 from typing import Self, Callable
 from urllib.parse import quote as _quote_
 from html import escape
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 import stealth_requests as requests
 import requests as rq
@@ -553,17 +554,29 @@ class SinglePhotoParser:
 class ReelsParser:
     @staticmethod
     def get_video_link(html_parser: BeautifulSoup|None, user_node: dict = None) -> str:
+        def has_audio(link: str) -> bool:
+            # Facebook sometimes serves a video-only DASH stream (vencode_tag "...dash_baseline...")
+            # in browser_native_*_url; real progressive files are tagged "...progressive_..."
+            try:
+                efg = parse_qs(urlparse(link).query)['efg'][0]
+                tag = json.loads(base64.urlsafe_b64decode(efg + '=='))['vencode_tag']
+                return 'dash_' not in tag.split('.')[-1]
+            except Exception:
+                return True
+
         def work_node(node: dict) -> str:
             video_node = Jq.first(node, 'videoDeliveryLegacyFields')
+            links = []
             for key in ['browser_native_hd_url', 'browser_native_sd_url']:
                 try:
                     video_link = Jq.first(video_node, key)
-                    if not video_link:
-                        continue
-                    return str(video_link)
+                    if video_link:
+                        links.append(str(video_link))
                 except StopIteration:
                     pass
-            raise FacebedException('Invalid reels link (vn)')
+            if not links:
+                raise FacebedException('Invalid reels link (vn)')
+            return next((link for link in links if has_audio(link)), links[0])
 
         if user_node:
             return work_node(user_node)
