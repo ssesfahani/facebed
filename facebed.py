@@ -638,7 +638,7 @@ class ReelsParser:
         op_name = ('📷 @' if is_ig else '') + owner_info['username' if is_ig else 'name']
         post_url = content_node['short_form_video_context']['shareable_url']
         post_date = content_node['creation_time']
-        post_text = content_node['message']['text']
+        post_text = (content_node.get('message') or {}).get('text', '')
         author_picture = Story.get_profile_picture(owner_info)
 
         likes, cmts, shares = ReelsParser.get_reaction_counts(html_parser, is_ig, video_id)
