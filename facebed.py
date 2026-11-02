@@ -56,14 +56,24 @@ def get_credit() -> str:
 class Utils:
     @staticmethod
     def resolve_share_link(path: str) -> str:
+        target = Utils._resolve_share_link(path, None)
+        # Facebook sometimes stops resolving share links for the server's IP; retry via PROXY_URL
+        proxy_url = os.environ.get('PROXY_URL')
+        if not target and proxy_url:
+            logging.warning(f'share link {path} did not resolve directly, retrying via proxy')
+            target = Utils._resolve_share_link(path, {'http': proxy_url, 'https': proxy_url})
+        return target
+
+    @staticmethod
+    def _resolve_share_link(path: str, proxies: dict | None) -> str:
         # cookies not needed to resolve share links
-        head_request = rq.head(f'{WWWFB}/{path}', headers=JsonParser.get_headers())
+        head_request = rq.head(f'{WWWFB}/{path}', headers=JsonParser.get_headers(), proxies=proxies, timeout=10)
         target = head_request.next.url if head_request.next else ''
         if not target or target.startswith(f'{WWWFB}/share') or '/login' in target:
             # Facebook sometimes answers 200 instead of redirecting; the target is then in og:url
             # plain requests can't decode zstd, which get_headers() advertises
             headers = {**JsonParser.get_headers(), 'accept-encoding': 'gzip, deflate'}
-            page = rq.get(f'{WWWFB}/{path}', headers=headers)
+            page = rq.get(f'{WWWFB}/{path}', headers=headers, proxies=proxies, timeout=10)
             target = page.url
             if target.startswith(f'{WWWFB}/share') or '/login' in target:
                 og_url = BeautifulSoup(page.text, 'html.parser').find('meta', property='og:url')
